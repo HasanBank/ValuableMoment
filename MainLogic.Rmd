@@ -1,0 +1,176 @@
+
+```{r}
+library(httr)
+library(tidyverse)
+
+end.point <- "https://westeurope.api.cognitive.microsoft.com/face/v1.0/detect"
+key1 <- "Your key"
+
+```
+```{r}
+base.dir <- "Directory of the main video, subtittle and python file"
+file.name = "VideoName.mp4"
+subtitle.name <- "Subtitle.srt"
+cut.name <- "Cut.mp4"
+```
+
+```{r}
+
+file.url = paste(base.dir, file.name, sep = "" )
+bashFunction = paste("/usr/local/bin/mediainfo", file.url, sep = " ")
+
+resultFromMediaInfo <- system(bashFunction, intern = TRUE)
+
+#1 = General, 2 = Video, 3 = Audio
+x <- grep("Duration",resultFromMediaInfo,value=T)
+
+duration = sub("Duration *:", "", x[1])
+min = strtoi(sub(" min .* s","",duration))
+sec = strtoi(sub(" s", "", sub(" .+ min ","",duration)))
+totalSec = min * 60 + sec
+
+fps <- str_extract(grep("Frame rate",resultFromMediaInfo,value=T)[2],regex("(\\d*)(?=[.])"))
+
+
+callsPerMinute = 20
+timeInterval = totalSec / callsPerMinute
+timeInterval = ceiling(timeInterval)
+
+library(reticulate)
+os <- import("cv2")
+pythonparameters = paste0(file.url," ",timeInterval," ",fps)
+pythonFunction = paste("python read_frames_fast.py ", pythonparameters, sep="")
+system(pythonFunction, wait=TRUE)
+
+```
+
+```{r}
+send.face <- function(filename){
+  face_res <- POST(url = end.point,
+                   add_headers(.headers = c("Ocp-Apim-Subscription-Key" = key1)),
+                   body = upload_file(filename,"application/octet-stream"),
+                   query = list(returnFaceAttributes = "emotion"),
+                   accept_json()
+                   )
+  
+  if(length(content(face_res)) > 0 )
+  {
+    ret.expr <- as_tibble(content(face_res)
+          [[1]]$faceAttributes$emotion)
+  } else {
+    ret.expr <- tibble(contempt = NA,
+                       disgust = NA,
+                       fear = NA,
+                       happiness = NA,
+                       neutral = NA,
+                       sadness = NA,
+                       surprise = NA)
+  }
+  return(ret.expr)
+}
+```
+```{r}
+
+extract.from.frames <- function(directory.location)
+{
+
+  face.analysis <- dir(directory.location) %>%
+    as_tibble() %>%
+    mutate(filename = paste0(directory.location,"/",value )) %>%
+    group_by(filename) %>%
+    do(send.face(.$filename)) %>%
+    ungroup %>%
+    mutate(frame.num = str_extract(filename, regex("(\\d*)(?=[.])")))
+  
+
+  
+  #Save temporary data frame for later use
+  temp.filename <-tail(stringr::str_split(directory.location,
+                                          stringr::fixed("/"))[[1]],1)
+  
+  write_excel_csv(x = face.analysis, path =
+                    paste0(base.dir, temp.filename, ".csv"))
+  return(face.analysis)
+}
+
+
+```
+```{r}
+
+frames.dir <- paste(base.dir, "frames", sep = "")
+results.many.frames <- extract.from.frames(frames.dir)
+
+
+```
+
+
+```{r}
+#Read Subtitle 
+library(subtools)
+
+
+lowestNeutralFrame = strtoi(results.many.frames$frame.num[order(results.many.frames$neutral)[1]])
+summarizedDuration = 10
+approxStartingTime = lowestNeutralFrame * timeInterval - summarizedDuration
+approxFinishingTime = approxStartingTime + summarizedDuration
+
+#Second to Hour:Minute:Second
+convertSecond <- function(input, flag)
+{
+  if(flag == 0)
+  { hour = floor(input / 3600)
+    second = input - hour * 3600
+    minute = floor(second / 60)
+    second = second - minute * 60
+    x = paste0(hour,":",minute,":",second)
+  }
+  else
+  {
+    x = input
+  }
+  
+  object <- strptime(x,"%H:%M:%OS")
+}
+
+#To find Last Character
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+
+
+
+subTitleDir <- paste0(base.dir,subtitle.name)
+
+subtitleDF <- read.subtitles(subTitleDir)
+
+approxStartingTime <- convertSecond(approxStartingTime,0)
+approxFinishingTime <- convertSecond(approxFinishingTime,0)
+
+subtitleStartTimes <- convertSecond(subtitleDF[["subtitles"]][["Timecode.in"]],1)
+subtitleFinishTimes <- convertSecond(subtitleDF[["subtitles"]][["Timecode.out"]],1)
+
+summaryStartingTime = subtitleDF[["subtitles"]][["Timecode.in"]][which(abs( subtitleStartTimes - approxStartingTime ) == min(abs( subtitleStartTimes - approxStartingTime ) ))]
+
+summaryFinishTimeIds <- which( (subtitleFinishTimes - approxFinishingTime > 0) )
+
+summaryFinishTime <- subtitleDF[["subtitles"]][["Timecode.out"]][summaryFinishTimeIds[min(which( substrRight(subtitleDF[["subtitles"]][["Text"]][(summaryFinishTimeIds)],1) == "."))]]
+
+
+
+
+```
+
+```{r}
+summarizedDuration = convertSecond(summaryFinishTime,1) -  convertSecond(summaryStartingTime,1)
+
+#ffmpeg to cut the video a section
+#ffmpeg -i movie.mp4 -ss 00:00:03 -t 00:00:08 -async 1 cut.mp4
+system(
+     paste0(
+      "ffmpeg -i ", file.url,
+      " -ss ", summaryStartingTime,
+      " -t ", summarizedDuration,
+      " -async 1 ", cut.name)
+    )
+```
+
