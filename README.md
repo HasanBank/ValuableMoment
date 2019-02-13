@@ -1,7 +1,7 @@
 # ValuableMoment
 
 <a href="https://www.slideshare.net/HasanBank/extracting-conference-highlights-using-machinelearning-systems-131654134">Half-time Presentation</a>
-<a href="https://www.slideshare.net/HasanBank/extracting-conference-highlights-using-machinelearning-systems"> Final Presentation<\a>
+<a href="https://www.slideshare.net/HasanBank/extracting-conference-highlights-using-machinelearning-systems"> Final Presentation</a>
 
 Summarizing a conference talk with R and Python as using Microsoft Emotion API
 
