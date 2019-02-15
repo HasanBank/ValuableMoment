@@ -5,7 +5,7 @@
 
 Summarizing a conference talk with R and Python as using Microsoft Emotion API
 
-The report is on progess...
+Details are in the paper.
 
 
 References:  <br />
